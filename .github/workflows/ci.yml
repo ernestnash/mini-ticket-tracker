@@ -54,3 +54,25 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run typecheck
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and start the stack
+        run: docker compose up -d --build
+      - name: Wait for the API
+        run: curl --fail --silent --retry 30 --retry-delay 2 --retry-connrefused http://localhost:3001/health
+      - name: Smoke test through the web proxy
+        run: |
+          curl --fail --silent --retry 15 --retry-delay 2 --retry-connrefused http://localhost:3000/ -o /dev/null
+          curl --fail --silent -X POST http://localhost:3000/api/tickets \
+            -H "content-type: application/json" \
+            -d '{"title":"CI smoke test","priority":"high"}'
+          curl --fail --silent http://localhost:3000/api/tickets/stats | grep -q '"open":1'
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

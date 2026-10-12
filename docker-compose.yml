@@ -1,0 +1,38 @@
+# One command for quick review: `docker compose up --build`, then open http://localhost:3000
+# This starts its own throwaway Postgres, so no DATABASE_URL or account is needed.
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./api
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/postgres
+      PORT: "3001"
+    ports:
+      - "3001:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+      args:
+        API_URL: http://api:3001 # baked into the /api/* rewrite at build time
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
