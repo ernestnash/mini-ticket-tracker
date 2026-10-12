@@ -19,6 +19,22 @@ with a merge commit, and CI must pass on `master`.
 | 4 | `feat/web-ui` | Next.js page: ticket list, create form, status change | done |
 | 5 | `docs/final-readme` | Decisions & Tradeoffs, Azure deployment notes, final pass | planned |
 
+## Quick start (Docker)
+
+Requires Docker with Compose. No database account or `DATABASE_URL` is needed: Compose starts its own PostgreSQL.
+
+```bash
+git clone https://github.com/ernestnash/mini-ticket-tracker.git
+cd mini-ticket-tracker
+docker compose up --build
+```
+
+Open <http://localhost:3000> for the UI. The API is on <http://localhost:3001> (try `/health`).
+The API creates the schema on start. Data lives in a Docker volume; `docker compose down -v` resets it.
+To run the API tests inside the stack: `docker compose run --rm api npm test`.
+
+The sections below describe running without Docker against your own PostgreSQL.
+
 ## Running the API
 
 Requires Node.js 22.18 or newer (see `api/package.json` engines).
@@ -36,6 +52,31 @@ npm run typecheck      # tsc --noEmit
 No local PostgreSQL is needed: the API reads `DATABASE_URL` from `api/.env` (loaded with Node's
 built-in `--env-file`). Hosted providers usually require SSL, so keep `?sslmode=require` in the URL.
 Tests only delete the rows they create, so they are safe to run against a shared database.
+
+## Running the web UI
+
+Requires the API above to be running (default `http://localhost:3001`).
+
+```bash
+cd web
+npm install
+cp .env.example .env   # optional: only needed if the API is not on http://localhost:3001
+npm run dev            # http://localhost:3000
+npm test               # unit tests for the API client (node:test)
+npm run build          # production build (also type-checks)
+```
+
+The browser only ever talks to `/api/*` on the Next.js origin. `next.config.ts` rewrites that to
+the Express API (`API_URL`), so the API needs no CORS configuration.
+
+Two pages. `/` tracks: status tabs with live counts, a ticket table with a status dropdown per
+row, and pagination (10 per page). `/new` submits: title and description with live character
+counters, priority as three labelled choices, and API validation errors shown next to the field
+they belong to. A successful create redirects to `/` with a confirmation. After a create or a
+status change the list and counts are refetched from the API, so the page always shows server
+state rather than a local guess. Fonts (IBM Plex) are fetched at build time by `next/font`, so
+the first `npm run build` needs network access. Component tests are not included; the API
+client's logic is unit-tested and a Playwright test of both pages is the next step.
 
 ## API
 
