@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createApp } from './app.ts';
+import { toStatusCounts } from './tickets.ts';
 import { pool } from './db.ts';
 
 type Ticket = {
@@ -39,6 +40,12 @@ type Page = { data: Ticket[]; page: number; limit: number; total: number };
 
 function get(path: string) {
   return fetch(`${baseUrl}${path}`);
+}
+
+async function getStats() {
+  const res = await get('/tickets/stats');
+  assert.equal(res.status, 200);
+  return (await res.json()) as Record<string, number>;
 }
 
 async function createTicket(title: string) {
@@ -247,4 +254,48 @@ test('PATCH /tickets/:id rejects invalid bodies and leaves the ticket unchanged'
 
   const { rows } = await pool.query('SELECT title, status, priority FROM tickets WHERE id = $1', [ticket.id]);
   assert.deepEqual(rows[0], { title: 'patch-test invalid', status: 'open', priority: 'medium' });
+});
+
+test('toStatusCounts fills in statuses that have no tickets', () => {
+  assert.deepEqual(toStatusCounts([]), { open: 0, in_progress: 0, closed: 0 });
+  assert.deepEqual(toStatusCounts([{ status: 'closed', count: 4 }]), { open: 0, in_progress: 0, closed: 4 });
+  assert.deepEqual(
+    toStatusCounts([
+      { status: 'in_progress', count: 2 },
+      { status: 'open', count: 7 },
+    ]),
+    { open: 7, in_progress: 2, closed: 0 },
+  );
+});
+
+// Stats are compared before and after, because the shared database may already hold other tickets.
+test('GET /tickets/stats counts tickets grouped by status', async () => {
+  const before = await getStats();
+  assert.deepEqual(Object.keys(before).sort(), ['closed', 'in_progress', 'open']);
+
+  const inserted = await pool.query(
+    `INSERT INTO tickets (title, status) VALUES
+       ('stats-test 1', 'open'), ('stats-test 2', 'in_progress'),
+       ('stats-test 3', 'in_progress'), ('stats-test 4', 'closed')
+     RETURNING id`,
+  );
+  createdIds.push(...inserted.rows.map((r) => r.id as string));
+
+  const after = await getStats();
+  assert.equal(after.open! - before.open!, 1);
+  assert.equal(after.in_progress! - before.in_progress!, 2);
+  assert.equal(after.closed! - before.closed!, 1);
+
+  const { rows } = await pool.query('SELECT count(*)::int AS n FROM tickets');
+  assert.equal(after.open! + after.in_progress! + after.closed!, rows[0].n);
+});
+
+test('GET /tickets/stats reflects a status change made through PATCH', async () => {
+  const before = await getStats();
+  const ticket = await createTicket('stats-test patch');
+  await patch(ticket.id, { status: 'closed' });
+  const after = await getStats();
+
+  assert.equal(after.open, before.open); // created as open, then moved to closed
+  assert.equal(after.closed! - before.closed!, 1);
 });
