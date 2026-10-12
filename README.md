@@ -15,7 +15,7 @@ with a merge commit, and CI must pass on `master`.
 | 0 | `master` | Repo, API skeleton with `/health`, test runner, CI | done |
 | 1 | `feat/create-ticket` | Postgres via docker compose, schema, `POST /tickets`, validation, tests | done |
 | 2 | `feat/list-tickets` | `GET /tickets` with `?status=` filter and `?page=&limit=` pagination | done |
-| 3 | `feat/update-ticket`, `feat/ticket-stats` | `PATCH /tickets/:id`, `GET /tickets/stats` | planned |
+| 3 | `feat/update-ticket`, `feat/ticket-stats` | `PATCH /tickets/:id`, `GET /tickets/stats` | in progress |
 | 4 | `feat/web-ui` | Next.js page: ticket list, create form, status change | planned |
 | 5 | `docs/final-readme` | Decisions & Tradeoffs, Azure deployment notes, final pass | planned |
 
@@ -72,6 +72,64 @@ Responds `201` with the created ticket:
 ```
 
 Invalid input responds `400`.
+
+### `GET /tickets`
+
+Lists tickets, newest first (`createdAt` descending, `id` as a tie-breaker so pages never
+skip or repeat rows).
+
+| Query param | Rules |
+| --- | --- |
+| `status` | optional: `open`, `in_progress` or `closed` |
+| `page` | optional integer, 1 to 1,000,000, defaults to `1` |
+| `limit` | optional integer, 1 to 100, defaults to `20` |
+
+```bash
+curl "http://localhost:3001/tickets?status=open&page=1&limit=10"
+```
+
+```json
+{
+  "data": [
+    {
+      "id": "5b0f6f0e-0d6e-4a1c-9f55-3a2f1f4f8c11",
+      "title": "Printer is on fire",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "createdAt": "2026-10-11T07:12:34.567Z"
+    }
+  ],
+  "page": 1,
+  "limit": 10,
+  "total": 42
+}
+```
+
+`total` is the number of tickets matching the filter (not just this page). A page past the
+end returns `200` with an empty `data` array. Invalid params respond `400`. Pagination uses
+`OFFSET`, which matches the spec but slows down on very deep pages; keyset pagination would
+be the next step at scale.
+
+### `PATCH /tickets/:id`
+
+Partially updates a ticket. Only `status` and `priority` can change, at least one is required,
+and any other field (for example `title`) is rejected with `400`.
+
+| Field | Type |
+| --- | --- |
+| `status` | `open` \| `in_progress` \| `closed` |
+| `priority` | `low` \| `medium` \| `high` |
+
+```bash
+curl -X PATCH http://localhost:3001/tickets/5b0f6f0e-0d6e-4a1c-9f55-3a2f1f4f8c11 \
+  -H "content-type: application/json" \
+  -d '{"status":"in_progress"}'
+```
+
+Responds `200` with the updated ticket, `400` for a malformed id or invalid body, and `404`
+when no ticket has that id. Any status transition is allowed (including reopening a closed
+ticket); a state machine would be the next step if the workflow needs rules.
 
 ## CI
 
