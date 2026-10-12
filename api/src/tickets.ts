@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Response } from 'express';
 import type { ZodError } from 'zod';
 import { pool } from './db.ts';
-import { createTicketSchema, listTicketsQuerySchema } from './schemas.ts';
+import { createTicketSchema, listTicketsQuerySchema, ticketIdSchema, updateTicketSchema } from './schemas.ts';
 
 export const ticketsRouter = Router();
 
@@ -57,4 +57,33 @@ ticketsRouter.get('/', async (req, res) => {
   ]);
 
   res.json({ data: list.rows, page, limit, total: count.rows[0].total });
+});
+
+ticketsRouter.patch('/:id', async (req, res) => {
+  const id = ticketIdSchema.safeParse(req.params.id);
+  if (!id.success) {
+    sendValidationError(res, id.error);
+    return;
+  }
+  const body = updateTicketSchema.safeParse(req.body);
+  if (!body.success) {
+    sendValidationError(res, body.error);
+    return;
+  }
+
+  // COALESCE keeps the current value for any field the client did not send.
+  // any status transition is allowed (including reopening closed tickets); add a state machine if the workflow needs one.
+  const { status, priority } = body.data;
+  const { rows } = await pool.query(
+    `UPDATE tickets
+     SET status = COALESCE($2, status), priority = COALESCE($3, priority)
+     WHERE id = $1
+     RETURNING ${COLUMNS}`,
+    [id.data, status ?? null, priority ?? null],
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'Ticket not found' });
+    return;
+  }
+  res.json(rows[0]);
 });

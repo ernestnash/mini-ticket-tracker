@@ -1,6 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createApp } from './app.ts';
@@ -45,6 +46,14 @@ async function createTicket(title: string) {
   const ticket = (await res.json()) as Ticket;
   createdIds.push(ticket.id);
   return ticket;
+}
+
+function patch(id: string, body: unknown) {
+  return fetch(`${baseUrl}/tickets/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 }
 
 function post(body: string) {
@@ -189,4 +198,53 @@ test('GET /tickets rejects invalid query params', async () => {
     assert.equal(res.status, 400, query);
     assert.equal(((await res.json()) as { error: string }).error, 'Validation failed', query);
   }
+});
+
+test('PATCH /tickets/:id updates the status and persists it', async () => {
+  const ticket = await createTicket('patch-test status');
+
+  const res = await patch(ticket.id, { status: 'in_progress' });
+  assert.equal(res.status, 200);
+  const updated = (await res.json()) as Ticket;
+  assert.equal(updated.status, 'in_progress');
+  assert.deepEqual({ ...updated, status: ticket.status }, ticket); // nothing else changed
+
+  const { rows } = await pool.query('SELECT status FROM tickets WHERE id = $1', [ticket.id]);
+  assert.equal(rows[0].status, 'in_progress');
+});
+
+test('PATCH /tickets/:id updates priority alone and both fields together', async () => {
+  const ticket = await createTicket('patch-test priority');
+
+  const onlyPriority = (await (await patch(ticket.id, { priority: 'high' })).json()) as Ticket;
+  assert.equal(onlyPriority.priority, 'high');
+  assert.equal(onlyPriority.status, 'open'); // untouched
+
+  const both = (await (await patch(ticket.id, { status: 'closed', priority: 'low' })).json()) as Ticket;
+  assert.equal(both.status, 'closed');
+  assert.equal(both.priority, 'low');
+});
+
+test('PATCH /tickets/:id returns 404 for an unknown ticket', async () => {
+  const res = await patch(randomUUID(), { status: 'closed' });
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: 'Ticket not found' });
+});
+
+test('PATCH /tickets/:id rejects a malformed id', async () => {
+  const res = await patch('not-a-uuid', { status: 'closed' });
+  assert.equal(res.status, 400);
+  assert.equal(((await res.json()) as { error: string }).error, 'Validation failed');
+});
+
+test('PATCH /tickets/:id rejects invalid bodies and leaves the ticket unchanged', async () => {
+  const ticket = await createTicket('patch-test invalid');
+
+  for (const body of [{}, { status: 'done' }, { priority: 'urgent' }, { status: null }, { title: 'renamed' }]) {
+    const res = await patch(ticket.id, body);
+    assert.equal(res.status, 400, JSON.stringify(body));
+  }
+
+  const { rows } = await pool.query('SELECT title, status, priority FROM tickets WHERE id = $1', [ticket.id]);
+  assert.deepEqual(rows[0], { title: 'patch-test invalid', status: 'open', priority: 'medium' });
 });
