@@ -1,27 +1,15 @@
 # Mini Ticket Tracker
 
-Take-home for Lodwar Services (Mid-Level Full-Stack Developer): a minimal REST API,
-PostgreSQL database and single-page UI for tracking support tickets.
+Take-home for Lodwar Services (Mid-Level Full-Stack Developer): a REST API, a PostgreSQL
+database and a small UI for tracking support tickets.
 
-**Stack:** Node.js · Express 5 · TypeScript · PostgreSQL · Next.js
+**Stack:** Node.js · Express 5 · TypeScript · PostgreSQL · Next.js 16 (React 19)
 
-## Roadmap
-
-I split the work into sprints. Each feature lives on its own branch, is merged into `master`
-with a merge commit, and CI must pass on `master`.
-
-| Sprint | Branch(es) | Delivers | Status |
-| --- | --- | --- | --- |
-| 0 | `master` | Repo, API skeleton with `/health`, test runner, CI | done |
-| 1 | `feat/create-ticket` | Postgres via docker compose, schema, `POST /tickets`, validation, tests | done |
-| 2 | `feat/list-tickets` | `GET /tickets` with `?status=` filter and `?page=&limit=` pagination | done |
-| 3 | `feat/update-ticket`, `feat/ticket-stats` | `PATCH /tickets/:id`, `GET /tickets/stats` | done |
-| 4 | `feat/web-ui` | Next.js page: ticket list, create form, status change | done |
-| 5 | `docs/final-readme` | Decisions & Tradeoffs, Azure deployment notes, final pass | planned |
+**Layout:** `api/` is the REST API and database schema, `web/` is the Next.js UI.
 
 ## Quick start (Docker)
 
-Requires Docker with Compose. No database account or `DATABASE_URL` is needed: Compose starts its own PostgreSQL.
+Requires Docker with Compose. No database account or configuration is needed: Compose starts its own PostgreSQL.
 
 ```bash
 git clone https://github.com/ernestnash/mini-ticket-tracker.git
@@ -29,54 +17,59 @@ cd mini-ticket-tracker
 docker compose up --build
 ```
 
-Open <http://localhost:3000> for the UI. The API is on <http://localhost:3001> (try `/health`).
+- UI: <http://localhost:3000> (`/` lists and updates tickets, `/new` creates one)
+- API: <http://localhost:3001> (try `/health`)
+
 The API creates the schema on start. Data lives in a Docker volume; `docker compose down -v` resets it.
-To run the API tests inside the stack: `docker compose run --rm api npm test`.
+Ports 3000 and 3001 must be free. The first build downloads fonts, so it needs network access.
 
-The sections below describe running without Docker against your own PostgreSQL.
+## Running without Docker
 
-## Running the API
+Requires Node.js 22.18 or newer and a PostgreSQL database. If you have none, start one with:
 
-Requires Node.js 22.18 or newer (see `api/package.json` engines).
+```bash
+docker run --name tickets-db -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:18
+```
+
+**API**
 
 ```bash
 cd api
 npm install
-cp .env.example .env   # then set DATABASE_URL to your hosted PostgreSQL connection string
+cp .env.example .env   # set DATABASE_URL, e.g. postgres://postgres:postgres@localhost:5432/postgres
 npm run db:migrate     # creates the tickets table (idempotent)
 npm run dev            # http://localhost:3001/health
-npm test               # runs db:migrate, then the integration tests (node:test)
-npm run typecheck      # tsc --noEmit
 ```
 
-No local PostgreSQL is needed: the API reads `DATABASE_URL` from `api/.env` (loaded with Node's
-built-in `--env-file`). Hosted providers usually require SSL, so keep `?sslmode=require` in the URL.
-Tests only delete the rows they create, so they are safe to run against a shared database.
-
-## Running the web UI
-
-Requires the API above to be running (default `http://localhost:3001`).
+**Web UI** (needs the API running)
 
 ```bash
 cd web
 npm install
-cp .env.example .env   # optional: only needed if the API is not on http://localhost:3001
+cp .env.example .env   # optional: only if the API is not on http://localhost:3001
 npm run dev            # http://localhost:3000
-npm test               # unit tests for the API client (node:test)
-npm run build          # production build (also type-checks)
 ```
 
-The browser only ever talks to `/api/*` on the Next.js origin. `next.config.ts` rewrites that to
-the Express API (`API_URL`), so the API needs no CORS configuration.
+For a hosted database, keep `?sslmode=require` in `DATABASE_URL`.
 
-Two pages. `/` tracks: status tabs with live counts, a ticket table with a status dropdown per
-row, and pagination (10 per page). `/new` submits: title and description with live character
-counters, priority as three labelled choices, and API validation errors shown next to the field
-they belong to. A successful create redirects to `/` with a confirmation. After a create or a
-status change the list and counts are refetched from the API, so the page always shows server
-state rather than a local guess. Fonts (IBM Plex) are fetched at build time by `next/font`, so
-the first `npm run build` needs network access. Component tests are not included; the API
-client's logic is unit-tested and a Playwright test of both pages is the next step.
+## Tests
+
+```bash
+cd api && npm test     # runs db:migrate, then the integration tests against DATABASE_URL
+cd web && npm test     # unit tests for the API client
+```
+
+The API tests are integration tests: they call the real HTTP endpoints against a real PostgreSQL and
+delete only the rows they create, so they are safe on a shared database. They cover create, list
+with filter and pagination, update, and stats. `npm run typecheck` runs `tsc --noEmit` in each package.
+
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request to `master`:
+
+- `api`: typecheck and integration tests against a throwaway PostgreSQL service container.
+- `web`: client tests, production build and typecheck.
+- `docker`: builds the compose stack, starts it, creates a ticket through the UI's `/api` proxy and checks the stats.
 
 ## API
 
@@ -147,10 +140,8 @@ curl "http://localhost:3001/tickets?status=open&page=1&limit=10"
 }
 ```
 
-`total` is the number of tickets matching the filter (not just this page). A page past the
-end returns `200` with an empty `data` array. Invalid params respond `400`. Pagination uses
-`OFFSET`, which matches the spec but slows down on very deep pages; keyset pagination would
-be the next step at scale.
+`total` is the number of tickets matching the filter, not just this page. A page past the end
+returns `200` with an empty `data` array. Invalid params respond `400`.
 
 ### `PATCH /tickets/:id`
 
@@ -169,13 +160,12 @@ curl -X PATCH http://localhost:3001/tickets/5b0f6f0e-0d6e-4a1c-9f55-3a2f1f4f8c11
 ```
 
 Responds `200` with the updated ticket, `400` for a malformed id or invalid body, and `404`
-when no ticket has that id. Any status transition is allowed (including reopening a closed
-ticket); a state machine would be the next step if the workflow needs rules.
+when no ticket has that id.
 
 ### `GET /tickets/stats`
 
 Returns the number of tickets per status. Every status is always present, with `0` when there
-are no tickets in it, so clients never have to handle a missing key.
+are none, so clients never handle a missing key.
 
 ```bash
 curl http://localhost:3001/tickets/stats
@@ -185,34 +175,37 @@ curl http://localhost:3001/tickets/stats
 { "open": 12, "in_progress": 3, "closed": 27 }
 ```
 
-It is a single `GROUP BY status` query. That is a full scan of the table (about 30k rows is
-still a trivial `HashAggregate`), so its cost grows with table size; for very large tables a
-cached or incrementally maintained counter would be the next step.
+## UI
 
-## CI
+- `/` lists tickets with status and priority, has status tabs with live counts, a status dropdown on every row, and pagination (10 per page).
+- `/new` is the create form: title and description with character counters, priority choice, and API validation errors shown next to the field. A successful create returns to `/` with a confirmation.
 
-GitHub Actions (`.github/workflows/ci.yml`) runs typecheck and tests on every push to
-`master` and on every pull request targeting `master`. The `api` job starts a throwaway
-PostgreSQL service container and points `DATABASE_URL` at it, so CI never touches your hosted
-database. The `web` job runs the client tests, builds the app and type-checks it. It uses `npm ci`, so commit
-`api/package-lock.json` and `web/package-lock.json` (generated by the first `npm install`).
+The browser only talks to `/api/*` on the Next.js origin. `next.config.ts` rewrites that to the
+Express API (`API_URL`), so the API needs no CORS configuration.
+
+## Assumptions
+
+- A new ticket always starts as `open`; the client cannot set the status on create.
+- Priority is optional on create and defaults to `medium`.
+- Only `status` and `priority` can be changed after creation; title and description are fixed.
+- Any status can change to any other, including reopening a closed ticket, because the brief defines no workflow.
+- Tickets are listed newest first, with a default page size of 20 and a maximum of 100.
+- Ids are UUIDs and timestamps are stored in UTC.
+- There are no users or authentication, so every ticket is visible to everyone.
 
 ## Decisions & Tradeoffs
 
-- **Two pages, not one.** The brief allows a single page, but submitting and triaging are different jobs, so `/new` and `/` keep each one uncluttered; the cost is one extra route and a redirect.
-- **Plain SQL with `pg` and zod, no ORM.** Four queries do not justify a query builder or migration framework; constraints (`CHECK` on status and priority, non-blank title) live in the database so they hold for any client. The schema script is idempotent instead of a versioned migration tool.
-- **`OFFSET` pagination.** It matches the requested `?page=&limit=` and is simple; `created_at DESC, id DESC` ordering keeps pages stable, and the page number is capped. Keyset pagination is the fix if deep pages get slow.
-- **Any status transition is allowed**, including reopening a closed ticket, because the brief defines no workflow. A state machine is the next step if rules appear.
-- **The browser talks only to `/api/*` on the Next.js origin**, rewritten to Express, so there is no CORS configuration and the API URL stays server-side.
-- **Tests are integration tests against a real Postgres** (`node:test`, built-in `fetch`), not mocks. They delete only the rows they create, so they are safe on a shared database, and CI uses a throwaway Postgres service container.
-- **Shortcuts taken:** no authentication or users, no editing of title or description, no delete, no component or end-to-end tests, no rate limiting or request logging.
-- **With more time:** Playwright tests of both pages, auth with per-user tickets, keyset pagination, and structured logging with a readiness check that pings the database.
+I used plain SQL with `pg` and zod instead of an ORM, because four queries do not justify a query builder, and the `CHECK` constraints on status, priority and title live in the database so they hold for any client. The schema is one idempotent SQL file run on start rather than a versioned migration tool, which I would replace as soon as a second schema change appears. Listing uses `OFFSET` pagination to match the requested `?page=&limit=`, with a stable `created_at DESC, id DESC` order; keyset pagination would be the fix if deep pages got slow. The stats endpoint is a single `GROUP BY` that scans the table, which is fine at this size, but I would cache or maintain counters for a very large table. The UI is two pages instead of the single page the brief allows, because creating and triaging tickets are different jobs and each stays uncluttered. The browser talks to the API through a Next.js rewrite, so there is no CORS setup and the API address stays server-side. Tests are integration tests against a real PostgreSQL rather than mocks, and CI runs them against a throwaway database. Shortcuts: no authentication, no editing of title or description, no delete, no component or end-to-end tests, and no rate limiting or request logging. With more time I would add Playwright tests for both pages, per-user tickets with auth, and a readiness check that pings the database.
 
-## Deploying to Azure
+## Roadmap (commit history)
 
-Not deployed as part of this exercise; this is the intended shape.
+I built this in sprints, one feature branch each, merged into `master` with a merge commit.
 
-- **Database:** Azure Database for PostgreSQL (Flexible Server). Set `DATABASE_URL` with `sslmode=require` and run `npm run db:migrate` once per release as a pipeline step.
-- **API:** a container on Azure Container Apps (or App Service) listening on `PORT`, with `DATABASE_URL` held as a secret, not baked into the image.
-- **Web:** a second container (or App Service) running `next start`, with `API_URL` pointing at the API's internal address. Because the rewrite runs on the server, the API need not be public.
-- **Pipeline:** the existing GitHub Actions workflow already gates `master`; add a deploy job that builds the two images and rolls them out after CI passes.
+| Sprint | Branch(es) | Delivers |
+| --- | --- | --- |
+| 0 | `master` | Repo, API skeleton with `/health`, test runner, CI |
+| 1 | `feat/create-ticket` | Schema, `POST /tickets`, validation, tests |
+| 2 | `feat/list-tickets` | `GET /tickets` with `?status=` filter and pagination |
+| 3 | `feat/update-ticket`, `feat/ticket-stats` | `PATCH /tickets/:id`, `GET /tickets/stats` |
+| 4 | `feat/web-ui` | Next.js UI: ticket list, create form, status change |
+| 5 | `feat/docker` | Docker Compose setup, CI smoke test, final README |
