@@ -8,3 +8,9 @@ export const createTicketSchema = z
     priority: z.enum(['low', 'medium', 'high']).default('medium'),
   })
   .strict();
+
+export const listTicketsQuerySchema = z.object({
+  status: z.enum(['open', 'in_progress', 'closed']).optional(),
+  page: z.coerce.number().int().min(1).max(1_000_000).default(1), // cap keeps OFFSET far below bigint overflow
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
