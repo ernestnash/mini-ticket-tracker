@@ -1,0 +1,21 @@
+{
+  "name": "ticket-tracker-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "v24.21.0" },
+  "scripts": {
+    "dev": "node --watch src/server.ts",
+    "start": "node src/server.ts",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  }
+}
