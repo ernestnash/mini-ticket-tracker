@@ -15,7 +15,7 @@ with a merge commit, and CI must pass on `master`.
 | 0 | `master` | Repo, API skeleton with `/health`, test runner, CI | done |
 | 1 | `feat/create-ticket` | Postgres via docker compose, schema, `POST /tickets`, validation, tests | done |
 | 2 | `feat/list-tickets` | `GET /tickets` with `?status=` filter and `?page=&limit=` pagination | done |
-| 3 | `feat/update-ticket`, `feat/ticket-stats` | `PATCH /tickets/:id`, `GET /tickets/stats` | in progress |
+| 3 | `feat/update-ticket`, `feat/ticket-stats` | `PATCH /tickets/:id`, `GET /tickets/stats` | done |
 | 4 | `feat/web-ui` | Next.js page: ticket list, create form, status change | planned |
 | 5 | `docs/final-readme` | Decisions & Tradeoffs, Azure deployment notes, final pass | planned |
 

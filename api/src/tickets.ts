@@ -2,7 +2,13 @@ import { Router } from 'express';
 import type { Response } from 'express';
 import type { ZodError } from 'zod';
 import { pool } from './db.ts';
-import { createTicketSchema, listTicketsQuerySchema, ticketIdSchema, updateTicketSchema } from './schemas.ts';
+import {
+  createTicketSchema,
+  listTicketsQuerySchema,
+  STATUSES,
+  ticketIdSchema,
+  updateTicketSchema,
+} from './schemas.ts';
 
 export const ticketsRouter = Router();
 
@@ -57,6 +63,19 @@ ticketsRouter.get('/', async (req, res) => {
   ]);
 
   res.json({ data: list.rows, page, limit, total: count.rows[0].total });
+});
+
+// Statuses with no tickets do not appear in GROUP BY output, so fill them in with 0.
+export function toStatusCounts(rows: { status: string; count: number }[]) {
+  const counts: Record<string, number> = Object.fromEntries(STATUSES.map((status) => [status, 0]));
+  for (const { status, count } of rows) counts[status] = count;
+  return counts;
+}
+
+// Keep this above any GET /:id route so "stats" is never read as an id.
+ticketsRouter.get('/stats', async (_req, res) => {
+  const { rows } = await pool.query('SELECT status, count(*)::int AS count FROM tickets GROUP BY status');
+  res.json(toStatusCounts(rows));
 });
 
 ticketsRouter.patch('/:id', async (req, res) => {
