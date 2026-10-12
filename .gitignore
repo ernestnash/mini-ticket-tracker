@@ -6,3 +6,6 @@ dist/
 .next/
 *.log
 .DS_Store
+
+# Next.js generated
+next-env.d.ts
