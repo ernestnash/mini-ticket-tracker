@@ -62,10 +62,20 @@ jobs:
       - name: Build and start the stack
         run: docker compose up -d --build
       - name: Wait for the API
-        run: curl --fail --silent --retry 30 --retry-delay 2 --retry-connrefused http://localhost:3001/health
+        run: |
+          for i in $(seq 1 45); do
+            curl --fail --silent http://localhost:3001/health && exit 0
+            sleep 2
+          done
+          echo "API did not become healthy"
+          docker compose ps
+          exit 1
       - name: Smoke test through the web proxy
         run: |
-          curl --fail --silent --retry 15 --retry-delay 2 --retry-connrefused http://localhost:3000/ -o /dev/null
+          for i in $(seq 1 45); do
+            curl --fail --silent http://localhost:3000/ -o /dev/null && break
+            sleep 2
+          done
           curl --fail --silent -X POST http://localhost:3000/api/tickets \
             -H "content-type: application/json" \
             -d '{"title":"CI smoke test","priority":"high"}'
